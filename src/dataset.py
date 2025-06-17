@@ -17,22 +17,24 @@
 from PIL import Image
 
 def generate_more_data(images, scale_factors=[0.9, 0.8, 0.7, 0.6], rotations=[90, 180, 270]):
-
+    """
+    Generate more training data by scaling and rotating the input images.
+    """
+    # add scale factor 1 and rotation 0
     scale_factors = [1.0] + scale_factors
     rotations = [0] + rotations
 
-    set_tuples = set((scale, angle) for scale in scale_factors for angle in rotations)
-
     augmented_images = []
     for img in images:
-        for scale, angle in set_tuples:
-            scaled_img = img.resize((int(img.width * scale), int(img.height * scale)), resample=Image.BICUBIC)
-            if angle == 0:
+        for scale in scale_factors:
+            for angle in rotations:
+                scaled_img = img.resize((int(img.width * scale), int(img.height * scale)), resample=Image.BICUBIC)
+                # Rotate the image
+                if angle != 0:
+                    scaled_img = scaled_img.rotate(angle, expand=True)
                 augmented_images.append(scaled_img)
-            else:
-                rotated_img = scaled_img.rotate(angle)
-                augmented_images.append(rotated_img)
     return augmented_images
+
 
 # Training samples. To prepare the training data, we first downsample the original train
 # ing images by the desired scaling factor n to form the LR images. Then we crop the LR
