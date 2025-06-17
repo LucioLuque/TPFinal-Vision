@@ -14,26 +14,25 @@
 #  downscaled with the factor 0.9, 0,8, 0.7 and 0.6. 2) Rotation: each image is rotated with
 #  the degree of 90, 180 and 270. Then we will have 5 4 1 = 19 times more images
 #  for training.
+from PIL import Image
 
 def generate_more_data(images, scale_factors=[0.9, 0.8, 0.7, 0.6], rotations=[90, 180, 270]):
-    """
-    Generate more training data by scaling and rotating the input images.
-    """
-    # add scale factor 1 and rotation 0
+
     scale_factors = [1.0] + scale_factors
     rotations = [0] + rotations
 
+    set_tuples = set((scale, angle) for scale in scale_factors for angle in rotations)
+
     augmented_images = []
     for img in images:
-        for scale in scale_factors:
+        for scale, angle in set_tuples:
             scaled_img = img.resize((int(img.width * scale), int(img.height * scale)), resample=Image.BICUBIC)
-            augmented_images.append(scaled_img)
-            for angle in rotations:
+            if angle == 0:
+                augmented_images.append(scaled_img)
+            else:
                 rotated_img = scaled_img.rotate(angle)
                 augmented_images.append(rotated_img)
     return augmented_images
-
-from PIL import Image
 
 # Training samples. To prepare the training data, we first downsample the original train
 # ing images by the desired scaling factor n to form the LR images. Then we crop the LR
@@ -88,7 +87,6 @@ def prepare_training_samples(images, scale_factor, sub_image_size, stride, borde
                 training_samples.append((lr_patch, hr_patch))
     
     return training_samples
-
 
 def get_dataset(images, scale_factor, sub_image_size, stride, border_crop=False):
     """
