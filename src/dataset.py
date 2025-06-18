@@ -102,17 +102,17 @@ def prepare_patches(images, scale_factor, patch_size, stride, border_crop=False)
     
     return patches
 
-def get_dataset(images, args_more_data, args_training_samples):
+def get_dataset(images, args_augment, args_patches):
     """
     Get the dataset of training samples.
     """
     # Generate more data by scaling and rotating
-    augmented_images = augment_data(images, *args_more_data)
+    augmented_images = augment_data(images, *args_augment)
 
     # Prepare training samples
-    training_samples = prepare_patches(augmented_images, *args_training_samples)
+    patches = prepare_patches(augmented_images, *args_patches)
 
-    return training_samples
+    return patches
 
 class SRTensorDataset(Dataset):
     """
@@ -173,23 +173,24 @@ def train_val_dataloaders(dataset, batch_size, num_workers=1, seed=42, val_split
     print(f"Training examples: {len(train_data)}")
     print(f"Validation examples: {len(val_data)}")
     print(f"Batch size: {batch_size}")
-    sample = next(iter(train_loader))
-    print(f"Sample LR shape: {sample[0][0].shape}, HR shape: {sample[1][0].shape}")
+    # sample = next(iter(train_loader))
+    # print(f"Sample LR shape: {sample[0][0].shape}, HR shape: {sample[1][0].shape}")
 
     return train_loader, val_loader
 
-def prepare_to_train(images, args_more_data, args_training_samples, args_dataloader):
+def prepare_to_train(images, args_augment, args_patches, args_dataloader):
     """
     Prepara el dataset y DataLoaders para entrenamiento.
 
     Args:
         images (list): Lista de imágenes PIL.
-        args_more_data (tuple): Parámetros para generar más datos.
-        args_training_samples (tuple): Parámetros para preparar muestras de entrenamiento.
+        args_augment (tuple): Parámetros para generar más datos.
+        args_patches (tuple): Parámetros para preparar muestras de entrenamiento.
         args_dataloader (dict): Parámetros para DataLoader.
 
     Returns:
         Tuple[DataLoader, DataLoader]: (train_loader, val_loader)
     """
-    dataset = get_dataset(images, args_more_data, args_training_samples)
+    dataset = get_dataset(images, args_augment, args_patches)
     return train_val_dataloaders(dataset, **args_dataloader)
+
