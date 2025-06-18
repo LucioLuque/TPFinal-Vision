@@ -1,3 +1,10 @@
+from datasets import load_dataset
+
+def load_general100_dataset():
+    ds = load_dataset("goodfellowliu/General100")
+    return ds
+
+
 #  Training dataset. The 91-image dataset is widely used as the training set in learning
 # based SR methods [10,5,1]. As deep models generally benefit from big data, studies
 #  have found that 91 images are not enough to push a deep model to the best performance.
@@ -14,6 +21,7 @@
 #  downscaled with the factor 0.9, 0,8, 0.7 and 0.6. 2) Rotation: each image is rotated with
 #  the degree of 90, 180 and 270. Then we will have 5 4 1 = 19 times more images
 #  for training.
+
 from PIL import Image
 
 def generate_more_data(images, scale_factors=[0.9, 0.8, 0.7, 0.6], rotations=[90, 180, 270]):
@@ -36,18 +44,17 @@ def generate_more_data(images, scale_factors=[0.9, 0.8, 0.7, 0.6], rotations=[90
     return augmented_images
 
 
-# Training samples. To prepare the training data, we first downsample the original train
-# ing images by the desired scaling factor n to form the LR images. Then we crop the LR
-#  training images into a set of fsub fsub-pixel sub-images with a stride k. The corre
-# sponding HR sub-images (with size (nfsub)2) are also cropped from the ground truth
+#  Training samples. To prepare the training data, we first downsample the original training 
+#  images by the desired scaling factor n to form the LR images. Then we crop the LR
+#  training images into a set of fsub fsub-pixel sub-images with a stride k. The corresponding 
+#  HR sub-images (with size (nfsub)2) are also cropped from the ground truth
 #  images. These LR/HR sub-image pairs are the primary training data.
 #  For the issue of padding, we empirically find that padding the input or output maps
 #  does little effect on the final performance. Thus we adopt zero padding in all layers
 #  according to the filter size. In this way, there is no need to change the sub-image size
-#  for different network designs. Another issue affecting the sub-image size is the decon
-# volution layer. As we train our models with the Caffe package [27], its deconvolution
-#  f
-#  ilters will generate the output with size (nfsub n + 1)2 instead of (nfsub)2. So we
+#  for different network designs. Another issue affecting the sub-image size is the 
+#  deconvolution layer. As we train our models with the Caffe package [27], its deconvolution
+#  filters will generate the output with size (nfsub n + 1)2 instead of (nfsub)2. So we
 #  also crop (n 1)-pixel borders on the HR sub-images. Finally, for 2, 3 and 4, we
 #  set the size of LR/HR sub-images to be 102 192, 72 192 and 62 212, respectively.
 
@@ -90,14 +97,14 @@ def prepare_training_samples(images, scale_factor, sub_image_size, stride, borde
     
     return training_samples
 
-def get_dataset(images, scale_factor, sub_image_size, stride, border_crop=False):
+def get_dataset(images, args_more_data, args_training_samples):
     """
     Get the dataset of training samples.
     """
     # Generate more data by scaling and rotating
-    augmented_images = generate_more_data(images)
+    augmented_images = generate_more_data(images, *args_more_data)
 
     # Prepare training samples
-    training_samples = prepare_training_samples(augmented_images, scale_factor, sub_image_size, stride, border_crop)
+    training_samples = prepare_training_samples(augmented_images, *args_training_samples)
 
     return training_samples
