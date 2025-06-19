@@ -76,10 +76,16 @@ class FSRCNN(nn.Module):
             nn.Conv2d(1, 56, kernel_size=5, padding=2),
             nn.PReLU()
         )
+
+        self._init_kaiming(self.extraction[0]) # He initialization for the first conv layer
+
         self.shrinking = nn.Sequential(
             nn.Conv2d(56, 12, kernel_size=1),
             nn.PReLU()
         )
+
+        self._init_kaiming(self.shrinking[0]) # He initialization for the shrinking layer
+
         self.mapping = nn.Sequential(
             nn.Conv2d(12, 12, kernel_size=3, padding=1),
             nn.PReLU(),
@@ -90,13 +96,36 @@ class FSRCNN(nn.Module):
             nn.Conv2d(12, 12, kernel_size=3, padding=1),
             nn.PReLU()
         )
+
+        self._init_kaiming(self.mapping[0]) # He initialization for the first conv layer in mapping
+        self._init_kaiming(self.mapping[2])
+        self._init_kaiming(self.mapping[4])
+        self._init_kaiming(self.mapping[6])
+
         self.expansion = nn.Sequential(
             nn.Conv2d(12, 56, kernel_size=1),
             nn.PReLU()
         )
+
+        self._init_kaiming(self.expansion[0]) # He initialization for the expansion layer
+
         self.upsample = nn.Sequential(
             nn.ConvTranspose2d(56, 1, kernel_size=9, stride=upsample_factor, padding=4, output_padding=upsample_factor-1)
         )
+
+        self._init_deconv(self.upsample[0])  # Gaussian initialization for the deconvolution layer
+
+    def _init_kaiming(self, layer):
+        if isinstance(layer, nn.Conv2d):
+            nn.init.kaiming_normal_(layer.weight, mode='fan_in', nonlinearity='relu')
+            if layer.bias is not None:
+                nn.init.zeros_(layer.bias)
+
+    def _init_deconv(self, layer):
+        if isinstance(layer, nn.ConvTranspose2d):
+            nn.init.normal_(layer.weight, mean=0.0, std=0.001)
+            if layer.bias is not None:
+                nn.init.zeros_(layer.bias)
 
     def forward(self, x):
         """
