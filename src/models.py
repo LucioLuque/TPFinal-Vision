@@ -64,6 +64,57 @@ class SimpleSRModel(nn.Module):
         """
         return self.body(x)
     
+
+class FSRCNN(nn.Module):
+    """
+    Ola
+    """
+    def __init__(self, upsample_factor):
+        super(FSRCNN, self).__init__()
+        
+        self.extraction = nn.Sequential(
+            nn.Conv2d(1, 56, kernel_size=5, padding=2),
+            nn.PReLU()
+        )
+        self.shrinking = nn.Sequential(
+            nn.Conv2d(56, 12, kernel_size=1),
+            nn.PReLU()
+        )
+        self.mapping = nn.Sequential(
+            nn.Conv2d(12, 12, kernel_size=3, padding=1),
+            nn.PReLU(),
+            nn.Conv2d(12, 12, kernel_size=3, padding=1),
+            nn.PReLU(),
+            nn.Conv2d(12, 12, kernel_size=3, padding=1),
+            nn.PReLU(),
+            nn.Conv2d(12, 12, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
+        self.expansion = nn.Sequential(
+            nn.Conv2d(12, 56, kernel_size=1),
+            nn.PReLU()
+        )
+        self.upsample = nn.Sequential(
+            nn.ConvTranspose2d(56, 1, kernel_size=9, stride=upsample_factor, padding=4, output_padding=upsample_factor-1)
+        )
+
+    def forward(self, x):
+        """
+        Forward pass del modelo secreto.
+        
+        Args:
+            x (torch.Tensor): Tensor de entrada de forma (N, C, H, W).
+        
+        Returns:
+            torch.Tensor: Tensor de salida de forma (N, C', H', W').
+        """
+        x = self.extraction(x)
+        x = self.shrinking(x)
+        x = self.mapping(x)
+        x = self.expansion(x)
+        x = self.upsample(x)
+        return x
+    
 def get_y_tensors(rgb_imgs):
     """
     Convert a list of RGB images to Y channel tensors.
