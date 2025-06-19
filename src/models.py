@@ -74,58 +74,46 @@ class FSRCNN(nn.Module):
         
         self.extraction = nn.Sequential(
             nn.Conv2d(1, 56, kernel_size=5, padding=2),
-            nn.PReLU()
+            nn.PReLU(56)
         )
-
-        self._init_kaiming(self.extraction[0]) # He initialization for the first conv layer
 
         self.shrinking = nn.Sequential(
             nn.Conv2d(56, 12, kernel_size=1),
-            nn.PReLU()
+            nn.PReLU(12)
         )
-
-        self._init_kaiming(self.shrinking[0]) # He initialization for the shrinking layer
 
         self.mapping = nn.Sequential(
             nn.Conv2d(12, 12, kernel_size=3, padding=1),
-            nn.PReLU(),
+            nn.PReLU(12),
             nn.Conv2d(12, 12, kernel_size=3, padding=1),
-            nn.PReLU(),
+            nn.PReLU(12),
             nn.Conv2d(12, 12, kernel_size=3, padding=1),
-            nn.PReLU(),
+            nn.PReLU(12),
             nn.Conv2d(12, 12, kernel_size=3, padding=1),
-            nn.PReLU()
+            nn.PReLU(12)
         )
-
-        self._init_kaiming(self.mapping[0]) # He initialization for the first conv layer in mapping
-        self._init_kaiming(self.mapping[2])
-        self._init_kaiming(self.mapping[4])
-        self._init_kaiming(self.mapping[6])
 
         self.expansion = nn.Sequential(
             nn.Conv2d(12, 56, kernel_size=1),
-            nn.PReLU()
+            nn.PReLU(56)
         )
-
-        self._init_kaiming(self.expansion[0]) # He initialization for the expansion layer
 
         self.upsample = nn.Sequential(
             nn.ConvTranspose2d(56, 1, kernel_size=9, stride=upsample_factor, padding=4, output_padding=upsample_factor-1)
         )
 
-        self._init_deconv(self.upsample[0])  # Gaussian initialization for the deconvolution layer
+        self._initialize_weights()
 
-    def _init_kaiming(self, layer):
-        if isinstance(layer, nn.Conv2d):
-            nn.init.kaiming_normal_(layer.weight, mode='fan_in', nonlinearity='relu')
-            if layer.bias is not None:
-                nn.init.zeros_(layer.bias)
-
-    def _init_deconv(self, layer):
-        if isinstance(layer, nn.ConvTranspose2d):
-            nn.init.normal_(layer.weight, mean=0.0, std=0.001)
-            if layer.bias is not None:
-                nn.init.zeros_(layer.bias)
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.ConvTranspose2d):
+                nn.init.normal_(m.weight, std=0.001)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
     def forward(self, x):
         """
@@ -161,5 +149,88 @@ def get_y_tensors(rgb_imgs):
         y_tensor = to_tensor(y).unsqueeze(0)  # (1, H, W)
         y_tensors.append(y_tensor)
     return y_tensors
+
+
+class FSRCNN_CA(nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        d, s = 56, 12  # FSRCNN params
+        self.extract = nn.Sequential(
+            nn.Conv2d(1, d, kernel_size=5, padding=2),
+            nn.PReLU(d)
+        )
+        self.shrink = nn.Sequential(
+            nn.Conv2d(d, s, kernel_size=1),
+            nn.PReLU(s)
+        )
+        # Solo 1 o 2 RCAB blocks en lugar de 4 convs
+        self.mapping = RIR(n_feat=s, n_blocks=4)  # RIR con 4 RCABs
+
+
+        self.expand = nn.Sequential(
+            nn.Conv2d(s, d, kernel_size=1),
+            nn.PReLU(d)
+        )
+        self.deconv = nn.ConvTranspose2d(d, 1, kernel_size=9, stride=scale, padding=4, output_padding=scale - 1)
+
+        # Inicialización como en FSRCNN
+        self._initialize_weights()
+
+    def forward(self, x):
+        x = self.extract(x)
+        x = self.shrink(x)
+        x = self.mapping(x)
+        x = self.expand(x)
+        x = self.deconv(x)
+        return x.clamp(0.0, 1.0)
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.ConvTranspose2d):
+                nn.init.normal_(m.weight, std=0.001)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+class RCAB(nn.Module):
+    def __init__(self, n_feat, kernel_size=3, reduction=8, bias=True):
+        super().__init__()
+        self.body = nn.Sequential(
+            nn.Conv2d(n_feat, n_feat, kernel_size, padding=kernel_size//2, bias=bias),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(n_feat, n_feat, kernel_size, padding=kernel_size//2, bias=bias),
+            CALayer(n_feat, reduction)
+        )
+
+    def forward(self, x):
+        return x + self.body(x)
+
+class CALayer(nn.Module):
+    def __init__(self, channel, reduction=8):
+        super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.channel_att = nn.Sequential(
+            nn.Conv2d(channel, channel // reduction, kernel_size=1, bias=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel // reduction, channel, kernel_size=1, bias=True),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        return x * self.channel_att(self.avg_pool(x))
+
+class RIR(nn.Module):
+    def __init__(self, n_feat, n_blocks=3):
+        super().__init__()
+        self.blocks = nn.Sequential(
+            *[RCAB(n_feat, kernel_size=3, reduction=8) for _ in range(n_blocks)],
+            nn.Conv2d(n_feat, n_feat, kernel_size=3, padding=1)  # salida del RIR
+        )
+
+    def forward(self, x):
+        return x + self.blocks(x)
 
 
