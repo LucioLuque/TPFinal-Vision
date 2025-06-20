@@ -63,7 +63,32 @@ class SimpleSRModel(nn.Module):
             torch.Tensor: Output tensor of shape (N, C', H', W').
         """
         return self.body(x)
-    
+
+class SRCNN(nn.Module):
+    """
+    Super-Resolution Convolutional Neural Network (SRCNN)
+    """
+    def __init__(self, upsample_factor):
+        super(SRCNN, self).__init__()
+        self.body = nn.Sequential(
+            nn.Conv2d(1, 64, kernel_size=9, padding=4),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 32, kernel_size=1, padding=0),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 1, kernel_size=5, padding=2),
+        )
+
+    def forward(self, x):
+        """
+        Forward pass of the model.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (N, C, H, W).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (N, C', H', W').
+        """
+        return self.body(x)
 
 class FSRCNN(nn.Module):
     """
