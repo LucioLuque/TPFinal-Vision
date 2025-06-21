@@ -48,6 +48,14 @@ def get_results(all_images, set_numbers=[5, 14], factors=[2, 3, 4], methods = ["
                 lr_images = all_images[set_number][factor]['lr']
                 hr_images = all_images[set_number][factor]['hr']
                 unsampled_images = upsample_images(lr_images, method=method, scale_factor=factor)
+                unsampled_images = [img.convert("YCbCr").split()[0] for img in unsampled_images]
+                hr_images = [img.convert("YCbCr").split()[0] for img in hr_images]
+                #crop the borders of the images, crop size is 4 pixels each side
+                crop_size = 4   
+                unsampled_images = [img.crop((crop_size, crop_size, img.width - crop_size, img.height - crop_size)) for img in unsampled_images]
+                hr_images = [img.crop((crop_size, crop_size, img.width - crop_size, img.height - crop_size)) for img in hr_images]
+                
+
                 psnr, ssim = calculate_average_metrics(hr_images, unsampled_images)
 
                 new_row = {
