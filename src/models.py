@@ -213,7 +213,6 @@ class FSRCA(nn.Module):
             nn.Conv2d(d, s, kernel_size=1),
             nn.PReLU(s)
         )
-        # Solo 1 o 2 RCAB blocks en lugar de 4 convs
         self.mapping = RIR(n_feat=s, n_blocks=4)  # RIR con 4 RCABs
 
         self.expand = nn.Sequential(
@@ -259,7 +258,7 @@ class FSRCA_PS(nn.Module):
             nn.Conv2d(d, s, kernel_size=1),
             nn.PReLU(s)
         )
-        # Solo 1 o 2 RCAB blocks en lugar de 4 convs
+ 
         self.mapping = RIR(n_feat=s, n_blocks=2)  # RIR con 2 RCABs
 
         self.expand = nn.Sequential(
