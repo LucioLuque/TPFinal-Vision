@@ -3,8 +3,8 @@ import torch
 import numpy as np
 from PIL import Image
 import pandas as pd
-from models import upsample_images, get_y_tensors
-from metrics import calculate_average_metrics, calculate_psnr_torch
+from models import get_y_tensors, Upsampler, SRCNN, FSRCNN, FSRCA, FSRCA_PS
+from metrics import calculate_average_metrics, calculate_psnr_torch, calculate_psnr
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
@@ -15,6 +15,8 @@ import json
 import matplotlib.pyplot as plt
 from PIL import Image
 import os
+import cv2
+import time
 
 def deterministic(seed=42):
     random.seed(seed)
@@ -49,35 +51,253 @@ def get_test_images(set_numbers=[5, 14], factors=[2, 3, 4]):
             }
     return test_images
 
-def get_results(all_images, set_numbers=[5, 14], factors=[2, 3, 4], methods = ["bicubic", "nearest", "bilinear"]):
-    results = []
-    for set_number in set_numbers:
-        for factor in factors:
-            for method in methods:
+# def get_interpolation_results(all_images, set_numbers=[5, 14], factors=[2, 3, 4], methods = ["nearest", "bilinear", "bicubic"]):
+#     results = []
+#     for set_number in set_numbers:
+#         for factor in factors:
+#             for method in methods:
                 
-                lr_images = all_images[set_number][factor]['lr']
-                hr_images = all_images[set_number][factor]['hr']
-                unsampled_images = upsample_images(lr_images, method=method, scale_factor=factor)
-                unsampled_images = [img.convert("YCbCr").split()[0] for img in unsampled_images]
-                hr_images = [img.convert("YCbCr").split()[0] for img in hr_images]
-                #crop the borders of the images, crop size is 4 pixels each side
-                crop_size = 4   
-                unsampled_images = [img.crop((crop_size, crop_size, img.width - crop_size, img.height - crop_size)) for img in unsampled_images]
-                hr_images = [img.crop((crop_size, crop_size, img.width - crop_size, img.height - crop_size)) for img in hr_images]
-                
+#                 lr_images = all_images[set_number][factor]['lr']
+#                 hr_images = all_images[set_number][factor]['hr']
+#                 model = Upsampler(mode=method, scale_factor=factor)
+#                 lr_images = get_y_tensors(lr_images)
+#                 hr_images = get_y_tensors(hr_images)
 
-                psnr, ssim = calculate_average_metrics(hr_images, unsampled_images)
+#                 unsampled_images = [model(img) for img in lr_images]
+#                 unsampled_images = [img[:, :, factor:-factor, factor:-factor].squeeze() for img in unsampled_images]
+#                 hr_images = [img[:, :, factor:-factor, factor:-factor].squeeze() for img in hr_images]
 
-                new_row = {
-                    "Set": set_number,
-                    "Factor": factor,
-                    "Method": method,
-                    "PSNR": psnr,
-                    "SSIM": ssim
-                }
-                results.append(new_row)
-    df = pd.DataFrame(results)
+#                 psnr, ssim = calculate_average_metrics(hr_images, unsampled_images, data_range=1.0)
+
+#                 new_row = {
+#                     "Dataset": f"Set{set_number}",
+#                     "Factor": factor,
+#                     "Method": method,
+#                     "PSNR": round(psnr, 2),
+#                     "SSIM": round(ssim, 4)
+#                 }
+#                 results.append(new_row)
+#     df = pd.DataFrame(results)
+#     df["Value"] = (
+#         df["PSNR"].map("{:.2f}".format)
+#         + "/"
+#         + df["SSIM"].map("{:.4f}".format)
+#     )
+#     table = df.pivot(
+#         index=["Dataset", "Factor"],
+#         columns="Method",
+#         values="Value"
+#     )
+#     table = table.reset_index()
+
+#     table["Set_num"] = table["Dataset"].str.extract(r"Set(\d+)").astype(int)
+#     table = table.sort_values(by=["Set_num", "Factor"])
+#     table = table.drop(columns="Set_num")
+#     table = table[["Dataset", "Factor", "nearest", "bilinear", "bicubic"]]
+#     return table
+
+
+def get_models(models_names, factor, device='cuda'):
+    models = []
+    for name in models_names:
+        if "nearest" == name:
+            models.append(Upsampler(scale_factor=factor, mode='nearest'))
+            
+        elif "bilinear" == name:
+            models.append(Upsampler(scale_factor=factor, mode='bilinear'))
+
+        elif "bicubic" == name:
+            models.append(Upsampler(scale_factor=factor, mode='bicubic'))
+
+        elif "SRCNN" == name:
+            srcnn_weights, _ = load_results("srcnn", factor, ft=False, device=device)
+            if srcnn_weights:
+                srcnn_model = SRCNN(upsample_factor=factor, middle_k_size=3)
+                srcnn_model.load_state_dict(srcnn_weights)
+                models.append(srcnn_model)
+            else:
+                models.append(None)
+
+        elif "FSRCNN" == name:
+            fsrcnn_weights, _ = load_results("fsrcnn", factor, ft=False, device=device)
+            if fsrcnn_weights:
+                fsrcnn_model = FSRCNN(upsample_factor=factor)
+                fsrcnn_model.load_state_dict(fsrcnn_weights)
+                models.append(fsrcnn_model)
+            else:
+                models.append(None)
+
+        elif "FSRCNN ft" == name:
+            fsrcnn_ft_weights, _ = load_results("fsrcnn", factor, ft=True, device=device)
+            if fsrcnn_ft_weights:
+                fsrcnn_ft_model = FSRCNN(upsample_factor=factor)
+                fsrcnn_ft_model.load_state_dict(fsrcnn_ft_weights)
+                models.append(fsrcnn_ft_model)
+            else:
+                models.append(None)
+
+        elif "FSRCA PS" == name:
+            fsrca_weights, _ = load_results("fsrca_ps", factor, ft=False, device=device)
+            if fsrca_weights:
+                fsrca_model = FSRCA_PS(upsample_factor=factor)
+                fsrca_model.load_state_dict(fsrca_weights)
+                models.append(fsrca_model)
+            else:
+                models.append(None)
+
+        elif "FSRCA PS ft" == name:
+            fsrca_weights, _ = load_results("fsrca_ps", factor, ft=True, device=device)
+            if fsrca_weights:
+                fsrca_model = FSRCA_PS(upsample_factor=factor)
+                fsrca_model.load_state_dict(fsrca_weights)
+                models.append(fsrca_model)
+            else:
+                models.append(None)
+
+        elif "FSRCA" == name:
+            fsrca_weights, _ = load_results("fsrca", factor, ft=False, device=device)
+            if fsrca_weights:
+                fsrca_model = FSRCA(upsample_factor=factor)
+                fsrca_model.load_state_dict(fsrca_weights)
+                models.append(fsrca_model)
+            else:
+                models.append(None)
+        
+        elif "FSRCA ft" == name:
+            fsrca_ft_weights, _ = load_results("fsrca", factor, ft=True, device=device)
+            if fsrca_ft_weights:
+                fsrca_ft_model = FSRCA(upsample_factor=factor)
+                fsrca_ft_model.load_state_dict(fsrca_ft_weights)
+                models.append(fsrca_ft_model)
+            else:
+                models.append(None)
+        else:
+            raise ValueError(f"Unknown model name: {name}")
+    return models
+            
+def get_models_results(models_name, set_numbers, factors, device="cuda"):
+    rows = []
+    for factor in factors:
+        models = get_models(models_name, factor, device=device)
+
+        for set_number in set_numbers:
+            row = {
+                "Dataset": f"Set{set_number}",
+                "Factor": factor
+            }
+
+            for model, title in zip(models, models_name):
+                if model:
+                    start = time.time()
+                    results = evaluate_model_on_sets(
+                        model,
+                        [set_number],  
+                        [factor],     
+                        device,
+                        print=False,
+                        show_plots=False
+                    )
+                    elapsed = time.time() - start
+                    psnr = results[set_number]["psnr"]
+                    ssim = results[set_number]["ssim"]
+
+                    row[title] = f"{psnr:.2f}/{ssim:.4f}/{elapsed:.2f}s"
+                else:
+                    row[title] = "-"
+            rows.append(row)
+
+    df = pd.DataFrame(rows)
+    df = df[["Dataset", "Factor"] + models_name]
+
     return df
+
+def overlay_zoom_patch(img, zoom=2, patch_ratio=0.25, margin_ratio=0.05, thickness=2):
+    img = np.array(img)
+
+    h_img, w_img = img.shape[:2]
+    patch_size = int(min(h_img, w_img) * patch_ratio)
+    patch_size = max(1, patch_size // 2 * 2)
+
+    margin_x = int(w_img * margin_ratio)
+    margin_y = int(h_img * margin_ratio)
+    top  = margin_y
+    left = w_img - patch_size - margin_x
+
+    img_patch = img[top:top + patch_size, left:left + patch_size]
+    
+    zoomed_patch = np.repeat(np.repeat(img_patch, zoom, axis=0),zoom, axis=1)
+
+    overlay = img.copy()
+    cv2.rectangle(overlay, (left, top), (left + patch_size, top + patch_size), (255, 0, 0), thickness=thickness)
+
+    h_lr, w_lr = img.shape[:2]
+    h_zp, w_zp = zoomed_patch.shape[:2]
+    dst_x = w_lr - w_zp
+    dst_y = h_lr - h_zp
+
+    overlay[dst_y:dst_y + h_zp, dst_x:dst_x + w_zp] = zoomed_patch
+
+    cv2.rectangle(overlay, (dst_x, dst_y), (dst_x + w_zp, dst_y + h_zp), (255, 0, 0), thickness=thickness)
+
+    return overlay
+
+def plot_zoom_patches(set_dict, img_index, factor, models, models_names, zoom_patches_args, device='cuda'):
+    lr, hr = set_dict['lr'][img_index], set_dict['hr'][img_index]
+    hr_patch = overlay_zoom_patch(hr, **zoom_patches_args)
+
+    hr_y = get_y_tensors([hr])[0].to(device)  # (1, 1, H, W)
+    hr_y_crop = hr_y[:, :, factor:-factor, factor:-factor]  # (1, 1, H', W')
+    hr_y_crop = hr_y_crop.squeeze(0).squeeze(0)  # (H', W')
+
+    lr_channels = rgb_to_ycbcr(lr)
+    lr_y = lr_channels[0].to(device)  # (1, H, W)
+    lr_cbcr = lr_channels[1:]
+    
+    patches= []
+    psnr_list = []
+
+    
+    for model in (models):
+        model= model.to(device).eval()
+        with torch.no_grad():
+            sr_y = model(lr_y)
+            sr_y = torch.clamp(sr_y.cpu(), 0, 1)
+            sr_y = sr_y[:, :, factor:-factor, factor:-factor] # (1, 1, H', W')
+            sr_y = sr_y.squeeze(0).squeeze(0)  # (H', W')
+
+        psnr = round(calculate_psnr(hr_y_crop, sr_y, data_range=1.0), 2)
+        psnr_list.append(f"{psnr} dB")
+
+
+        sr_color = color_sr(sr_y, lr_cbcr, factor)
+        sr_patch = overlay_zoom_patch(sr_color, **zoom_patches_args)
+        patches.append(sr_patch)
+
+    patches.append(hr_patch)
+    psnr_list.append('PSNR')
+
+    subtitles =  models_names + ['High Resolution']
+    subtitles = [f"{name} / {psnr}" for name, psnr in zip(subtitles, psnr_list)]
+    fig, axes = plt.subplots(1, len(patches), figsize=(12, 6))
+    for ax, patch, subtitle in zip(axes, patches, subtitles):
+        ax.imshow(patch)
+        ax.text(
+                0.5,                 
+                -0.01,               
+                subtitle,            
+                transform=ax.transAxes,
+                ha='center',         
+                va='top',            
+                fontsize='large'    
+            )
+        ax.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+def compare_plot_patches_models(set_dict, img_index, factor, models_names, zoom_patches_args, device):
+    models = get_models(models_names, factor, device=device)
+
+    plot_zoom_patches(set_dict, img_index, factor, models, models_names, zoom_patches_args, device=device)
 
 def train_model(model, train_loader, val_loader, factor, num_epochs=50, lr=1e-4, criterion=nn.MSELoss(), early_stopping_patience=10):
     device = torch.device("cuda")
@@ -177,6 +397,7 @@ def train_model(model, train_loader, val_loader, factor, num_epochs=50, lr=1e-4,
         os.remove(checkpoint_path)
 
     return train_loss, valid_loss, psnr_list
+
 def save_results(model, train_loss, valid_loss, psnr_list, model_name, factor, ft=False):
     model_upper = model_name.upper()
     weights_path = f"../Results/Weights/{model_upper}/{model_name}_x{factor}"
@@ -192,7 +413,29 @@ def save_results(model, train_loss, valid_loss, psnr_list, model_name, factor, f
     with open(losses_path, "w") as f:
         json.dump({"train_loss": train_loss, "valid_loss": valid_loss, "psnr_list": psnr_list}, f)
 
-def load_results(model_name, factor, ft=False):
+def compare_loss_plot(loss, models_names, fts, factor, titles, colors, loss_label, device="cuda"):
+    """
+    Compare the loss of different models.
+    """
+    losses = []
+    for model_name, ft in zip(models_names, fts):
+        model_loss = load_results(model_name, factor, ft=ft, device=device)[1][loss]
+        losses.append(model_loss)
+    
+    plt.figure(figsize=(10, 6))
+    for model_loss, title, color in zip(losses, titles, colors):
+        plt.plot(model_loss, label=f"{title} ({model_loss[-1]:.2f} dB)", color=color)
+
+    plt.xticks(fontsize=14)  
+    plt.yticks(fontsize=14)   
+    plt.xlabel('Epochs', fontsize=16)
+    plt.ylabel(loss_label, fontsize=16)
+    plt.legend(fontsize=16)
+    plt.grid()
+    plt.show()
+
+def load_results(model_name, factor, ft=False, device='cuda'):
+
     model_upper = model_name.upper()
     weights_path = f"../Results/Weights/{model_upper}/{model_name}_x{factor}"
     losses_path = f"../Results/Losses/{model_upper}/{model_name}_x{factor}"
@@ -202,8 +445,10 @@ def load_results(model_name, factor, ft=False):
 
     weights_path += ".pth"
     losses_path += ".json"
-
-    model_weights = torch.load(weights_path)
+    if not os.path.exists(weights_path):
+        print(f"Model weights not found at {weights_path}.")
+        return None, None
+    model_weights = torch.load(weights_path, map_location=device)
     with open(losses_path, "r") as f:
         losses_data = json.load(f)
 
@@ -239,10 +484,10 @@ def color_sr(sr, color_channels, f):
     return np.array(rgb)
 
 
-def evaluate_model_on_sets(model, sets, factor_list, device, show_plots=True):
+def evaluate_model_on_sets(model, sets, factor_list, device, print=True, show_plots=True):
     test_imgs = get_test_images(sets, factor_list)
     model.eval()
-
+    results = {s: {} for s in sets}
     for s in sets:
         for f in factor_list:
             lr_imgs = test_imgs[s][f]["lr"]
@@ -288,4 +533,15 @@ def evaluate_model_on_sets(model, sets, factor_list, device, show_plots=True):
 
             # Calculate metrics for this set
             psnr, ssim = calculate_average_metrics(hr_y_imgs_np, sr_y_imgs_np, data_range=1.0)
-            print(f"Set {s}, Factor {f} - Average PSNR: {psnr:.2f} dB, SSIM: {ssim:.4f}")
+            psnr = round(psnr, 2)
+            ssim = round(ssim, 4)
+            
+            results[s]= {
+                "psnr": psnr,
+                "ssim": ssim
+            }
+    if print:
+        for s, metrics in results.items():
+            print(f"Set {s} - Average PSNR: {metrics['psnr']} dB, SSIM: {metrics['ssim']}")
+    else:
+        return results

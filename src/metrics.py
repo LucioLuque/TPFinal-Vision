@@ -1,7 +1,4 @@
 # https://scikit-image.org/docs/stable/api/skimage.metrics.html#skimage.metrics.peak_signal_noise_ratio
-
-# skimage.metrics.peak_signal_noise_ratio(image_true, image_test, *, data_range=None)
-# implement function to calculate PSNR between two images
 from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
 import numpy as np 
 import torch
