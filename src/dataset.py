@@ -13,24 +13,6 @@ def load_general100_dataset():
     ds = load_dataset("goodfellowliu/General100")
     return ds
 
-
-#  Training dataset. The 91-image dataset is widely used as the training set in learning
-# based SR methods [10,5,1]. As deep models generally benefit from big data, studies
-#  have found that 91 images are not enough to push a deep model to the best performance.
-#  Yang et al. [24] and Schulter et al. [7] use the BSD500 dataset [25]. However, images
-#  in the BSD500 are in JPEG format, which are not optimal for the SR task. Therefore,
-#  we contribute a new General-100 dataset that contains 100 bmp-format images (with
-#  no compression)4. The size of the newly introduced 100 images ranges from 710 704
-#  (large) to 131 112 (small). They are all of good quality with clear edges but fewer
-#  smooth regions (e.g., sky and ocean), thus are very suitable for the SR training. In
-#  the following experiments, apart from using the 91-image dataset for training, we will
-#  also evaluate the applicability of the joint set of the General-100 dataset and the 91
-# image dataset to train our networks. To make full use of the dataset, we also adopt data
-#  augmentation as in [8]. We augment the data in two ways. 1) Scaling: each image is
-#  downscaled with the factor 0.9, 0,8, 0.7 and 0.6. 2) Rotation: each image is rotated with
-#  the degree of 90, 180 and 270. Then we will have 5 4 1 = 19 times more images
-#  for training.
-
 from PIL import Image
 
 def augment_data(images, scale_factors=[0.9, 0.8, 0.7, 0.6], rotations=[90, 180, 270]):
@@ -52,59 +34,6 @@ def augment_data(images, scale_factors=[0.9, 0.8, 0.7, 0.6], rotations=[90, 180,
                 augmented_images.append(scaled_img)
     return augmented_images
 
-
-#  Training samples. To prepare the training data, we first downsample the original training 
-#  images by the desired scaling factor n to form the LR images. Then we crop the LR
-#  training images into a set of fsub fsub-pixel sub-images with a stride k. The corresponding 
-#  HR sub-images (with size (nfsub)2) are also cropped from the ground truth
-#  images. These LR/HR sub-image pairs are the primary training data.
-#  For the issue of padding, we empirically find that padding the input or output maps
-#  does little effect on the final performance. Thus we adopt zero padding in all layers
-#  according to the filter size. In this way, there is no need to change the sub-image size
-#  for different network designs. Another issue affecting the sub-image size is the 
-#  deconvolution layer. As we train our models with the Caffe package [27], its deconvolution
-#  filters will generate the output with size (nfsub n + 1)2 instead of (nfsub)2. So we
-#  also crop (n 1)-pixel borders on the HR sub-images. Finally, for 2, 3 and 4, we
-#  set the size of LR/HR sub-images to be 102 192, 72 192 and 62 212, respectively.
-
-# def prepare_patches(images, scale_factor, patch_size, stride, border_crop=False):
-#     """
-#     Prepare training samples by downsampling and cropping images.
-#     Scale 2, patch_size = (10, 10), stride = 5, border_crop = True.
-#     Scale 3, patch_size = (7, 7), stride = 3, border_crop = True.
-#     Scale 4, patch_size = (6, 6). stride = 2, border_crop = True.
-#     """
-#     patches = []
-    
-#     for img in images:
-#         # Downsample the image
-#         lr_size = (int(img.width // scale_factor), int(img.height // scale_factor))
-#         lr_img = img.resize(lr_size, resample=Image.BICUBIC)
-        
-#         # Crop LR and HR sub-images
-#         for y in range(0, lr_img.height - patch_size[1] + 1, stride):
-#             for x in range(0, lr_img.width - patch_size[0] + 1, stride):
-
-#                 lr_patch = lr_img.crop((x, y, x + patch_size[0], y + patch_size[1]))
-
-#                 x_hr, y_hr = x * scale_factor, y * scale_factor
-#                 w_hr, h_hr = patch_size[0] * scale_factor, patch_size[1] * scale_factor
-                
-#                 if x_hr + w_hr > img.width or y_hr + h_hr > img.height:
-#                     continue
-
-#                 hr_patch = img.crop((x_hr, y_hr, x_hr + w_hr, y_hr + h_hr))
-
-#                 if border_crop: #if model has deconvolution layer, crop (scale_factor - 1) pixels
-#                     border = scale_factor - 1
-#                     if border > 0:
-#                         hr_patch = hr_patch.crop((border, border,
-#                                                 hr_patch.width - border,
-#                                                 hr_patch.height - border))
-
-#                 patches.append((lr_patch, hr_patch))
-    
-#     return patches
 
 def prepare_patches(images, scale_factor, patch_size, stride, use_deconv=True):
     """
@@ -184,7 +113,6 @@ class SRTensorDataset(Dataset):
 
         return lr_tensor, hr_tensor
 
-
 def train_val_dataloaders(dataset, batch_size, num_workers=1, seed=42, val_split=0.1):
     """
     Crea los DataLoaders para entrenamiento y validación a partir de un dataset de super-resolución.
@@ -239,95 +167,6 @@ def prepare_to_train(images, args_augment, args_patches, args_dataloader):
 
 
 # cosas del chat:
-
-
-class LazyPatchDataset(Dataset):
-    def __init__(self, images, scale_factor, patch_size, stride, use_deconv=True):
-        self.samples = []
-        self.images = images
-        self.scale_factor = scale_factor
-        self.patch_size = patch_size
-        self.stride = stride
-        self.use_deconv = use_deconv
-        self.to_tensor = T.ToTensor()
-
-        for img_idx, img in enumerate(images):
-            w, h = img.size
-            lr_w = w // scale_factor
-            lr_h = h // scale_factor
-
-            for y in range(0, lr_h - patch_size + 1, stride):
-                for x in range(0, lr_w - patch_size + 1, stride):
-                    self.samples.append((img_idx, x, y))  # índice de imagen y coordenadas
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        img_idx, x, y = self.samples[idx]
-        img = self.images[img_idx]
-
-        scale = self.scale_factor
-        patch_size = self.patch_size
-
-        lr_size = (img.width // scale, img.height // scale)
-        lr_img = img.resize(lr_size, Image.BICUBIC)
-        lr_patch = lr_img.crop((x, y, x + patch_size, y + patch_size))
-
-        if self.use_deconv:
-            hr_patch_size = scale * (patch_size - 1) - 2 * 4 + 9 + scale - 1
-        else:
-            hr_patch_size = patch_size * scale
-
-        x_hr, y_hr = x * scale, y * scale
-        hr_patch = img.crop((x_hr, y_hr, x_hr + hr_patch_size, y_hr + hr_patch_size))
-
-        # Convertir a canal Y + tensor
-        lr_y = self.to_tensor(lr_patch.convert("YCbCr").split()[0])
-        hr_y = self.to_tensor(hr_patch.convert("YCbCr").split()[0])
-
-        return lr_y, hr_y
-
-def lazy_train_val_dataloaders(images, scale_factor, patch_size, stride, use_deconv=True,
-                               batch_size=16, num_workers=1, seed=42, val_split=0.1):
-    """
-    Crea DataLoaders para entrenamiento y validación usando LazyPatchDataset.
-
-    Args:
-        images (list): Lista de imágenes PIL.
-        scale_factor (int): Factor de escala.
-        patch_size (int): Tamaño del patch LR.
-        stride (int): Paso para extraer patches LR.
-        use_deconv (bool): Si el modelo usa ConvTranspose2d.
-        batch_size (int): Tamaño de batch.
-        num_workers (int): Subprocesos para cargar datos.
-        seed (int): Semilla para reproducibilidad.
-        val_split (float): Proporción de validación.
-
-    Returns:
-        Tuple[DataLoader, DataLoader]: (train_loader, val_loader)
-    """
-    deterministic(seed)
-
-    dataset = LazyPatchDataset(images, scale_factor, patch_size, stride, use_deconv)
-
-    val_size = int(len(dataset) * val_split)
-    train_size = len(dataset) - val_size
-
-    train_data, val_data = random_split(dataset, [train_size, val_size])
-
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-
-    print("Lazy Dataset Statistics:\n")
-    print(f"Total samples: {len(dataset)}")
-    print(f"Training examples: {len(train_data)}")
-    print(f"Validation examples: {len(val_data)}")
-    print(f"Batch size: {batch_size}")
-
-    return train_loader, val_loader
-
-
 def pil_to_cv2(image):
     return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
@@ -355,13 +194,14 @@ def augment_data_cv2(images, scale_factors=[0.9, 0.8, 0.7, 0.6], rotations=[90, 
     return augmented_images
 
 class LazyPatchDatasetCV2(Dataset):
-    def __init__(self, images, scale_factor, patch_size, stride, use_deconv=True):
+    def __init__(self, images, scale_factor, patch_size, stride, use_deconv=True, upscale=False):
         self.samples = []
         self.images = images  # lista de arrays NumPy en BGR
         self.scale = scale_factor
         self.patch_size = patch_size
         self.stride = stride
         self.use_deconv = use_deconv
+        self.upscale = upscale  # Si True, hace upscale bicúbico de LR
 
         for img_idx, img in enumerate(images):
             h, w, _ = img.shape
@@ -396,6 +236,10 @@ class LazyPatchDatasetCV2(Dataset):
         x_hr, y_hr = x * scale, y * scale
         hr_patch = img[y_hr:y_hr + hr_patch_size, x_hr:x_hr + hr_patch_size]
 
+        if self.upscale:
+            # Si upscale es True, hacer upscale bicúbico de la imagen LR
+            lr_patch = cv2.resize(lr_patch, (lr_patch.shape[1] * scale, lr_patch.shape[0] * scale), interpolation=cv2.INTER_CUBIC)
+
         # Convertir a Y (luminancia)
         lr_y = cv2.cvtColor(lr_patch, cv2.COLOR_BGR2YCrCb)[:, :, 0]
         hr_y = cv2.cvtColor(hr_patch, cv2.COLOR_BGR2YCrCb)[:, :, 0]
@@ -407,7 +251,7 @@ class LazyPatchDatasetCV2(Dataset):
         return lr_tensor, hr_tensor
 
 def lazy_train_val_dataloaders_cv2(images, scale_factor, patch_size, stride, use_deconv=True,
-                                   batch_size=16, num_workers=1, seed=42, val_split=0.1):
+                                   batch_size=16, num_workers=1, seed=42, val_split=0.1, upscale=False):
     """
     Crea DataLoaders para entrenamiento y validación usando LazyPatchDatasetCV2.
 
@@ -427,7 +271,7 @@ def lazy_train_val_dataloaders_cv2(images, scale_factor, patch_size, stride, use
     """
     deterministic(seed)
 
-    dataset = LazyPatchDatasetCV2(images, scale_factor, patch_size, stride, use_deconv)
+    dataset = LazyPatchDatasetCV2(images, scale_factor, patch_size, stride, use_deconv, upscale)
 
     val_size = int(len(dataset) * val_split)
     train_size = len(dataset) - val_size
@@ -444,3 +288,157 @@ def lazy_train_val_dataloaders_cv2(images, scale_factor, patch_size, stride, use
     print(f"Batch size: {batch_size}")
 
     return train_loader, val_loader
+
+
+# import albumentations as A
+
+# class AlbumentationsPatchDataset(Dataset):
+#     """
+#     Dataset that extracts random patches from images and applies Albumentations transforms on-the-fly.
+#     This avoids storing all patches in memory and leverages fast augmentation.
+#     """
+#     def __init__(
+#         self,
+#         images,
+#         scale_factor,
+#         patch_size,
+#         num_patches_per_image=100,
+#         use_deconv=True,
+#         upscale=False,
+#         transform=None,
+#         random_crop=True
+#     ):
+#         """
+#         Args:
+#             images (list): List of NumPy BGR images (OpenCV format).
+#             scale_factor (int): Downscaling factor.
+#             patch_size (int): LR patch size.
+#             num_patches_per_image (int): Number of random patches to extract per image per epoch.
+#             use_deconv (bool): If True, use FSRCNN-style HR patch size.
+#             upscale (bool): If True, upsample LR patch to HR size before feeding to model.
+#             transform (albumentations.Compose): Albumentations transform to apply to both LR and HR.
+#             random_crop (bool): If True, use random crop; else, use center crop.
+#         """
+#         self.images = images
+#         self.scale = scale_factor
+#         self.patch_size = patch_size
+#         self.num_patches_per_image = num_patches_per_image
+#         self.use_deconv = use_deconv
+#         self.upscale = upscale
+#         self.transform = transform
+#         self.random_crop = random_crop
+
+#         # Precompute HR patch size
+#         if use_deconv:
+#             self.hr_patch_size = scale_factor * (patch_size - 1) - 2 * 4 + 9 + scale_factor - 1
+#         else:
+#             self.hr_patch_size = patch_size * scale_factor
+
+#         # Build index: (img_idx, patch_idx)
+#         self.indices = [
+#             (img_idx, patch_idx)
+#             for img_idx in range(len(images))
+#             for patch_idx in range(num_patches_per_image)
+#         ]
+
+#     def __len__(self):
+#         return len(self.indices)
+
+#     def __getitem__(self, idx):
+#         img_idx, _ = self.indices[idx]
+#         img = self.images[img_idx]
+
+#         # Downscale HR to LR
+#         h, w, _ = img.shape
+#         lr_w = w // self.scale
+#         lr_h = h // self.scale
+#         lr_img = cv2.resize(img, (lr_w, lr_h), interpolation=cv2.INTER_CUBIC)
+
+#         # Random or center crop LR patch
+#         if self.random_crop:
+#             x = np.random.randint(0, lr_w - self.patch_size + 1)
+#             y = np.random.randint(0, lr_h - self.patch_size + 1)
+#         else:
+#             x = (lr_w - self.patch_size) // 2
+#             y = (lr_h - self.patch_size) // 2
+
+#         lr_patch = lr_img[y:y+self.patch_size, x:x+self.patch_size]
+
+#         # Corresponding HR patch
+#         x_hr = x * self.scale
+#         y_hr = y * self.scale
+#         hr_patch = img[y_hr:y_hr+self.hr_patch_size, x_hr:x_hr+self.hr_patch_size]
+
+#         # Optionally upscale LR patch to HR size (for SRCNN)
+#         if self.upscale:
+#             lr_patch = cv2.resize(lr_patch, (hr_patch.shape[1], hr_patch.shape[0]), interpolation=cv2.INTER_CUBIC)
+
+#         # Apply Albumentations (must be HWC, uint8)
+#         if self.transform is not None:
+#             augmented = self.transform(image=lr_patch, mask=hr_patch)
+#             lr_patch = augmented["image"]
+#             hr_patch = augmented["mask"]
+
+#         # Convert to Y channel
+#         lr_y = cv2.cvtColor(lr_patch, cv2.COLOR_BGR2YCrCb)[:, :, 0]
+#         hr_y = cv2.cvtColor(hr_patch, cv2.COLOR_BGR2YCrCb)[:, :, 0]
+
+#         # Normalize and convert to tensor
+#         lr_tensor = torch.from_numpy(lr_y).unsqueeze(0).float() / 255.0
+#         hr_tensor = torch.from_numpy(hr_y).unsqueeze(0).float() / 255.0
+
+#         return lr_tensor, hr_tensor
+
+# def albumentations_train_val_dataloaders_cv2(
+#     images,
+#     scale_factor,
+#     patch_size,
+#     num_patches_per_image=100,
+#     use_deconv=True,
+#     upscale=False,
+#     batch_size=16,
+#     num_workers=2,
+#     seed=42,
+#     val_split=0.1,
+#     albumentations_transform=None,
+#     random_crop=True
+# ):
+#     """
+#     Create DataLoaders using AlbumentationsPatchDataset for efficient patch extraction and augmentation.
+#     """
+#     deterministic(seed)
+#     dataset = AlbumentationsPatchDataset(
+#         images,
+#         scale_factor,
+#         patch_size,
+#         num_patches_per_image=num_patches_per_image,
+#         use_deconv=use_deconv,
+#         upscale=upscale,
+#         transform=albumentations_transform,
+#         random_crop=random_crop
+#     )
+
+#     val_size = int(len(dataset) * val_split)
+#     train_size = len(dataset) - val_size
+
+#     train_data, val_data = random_split(dataset, [train_size, val_size])
+
+#     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+#     val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+
+#     print("Albumentations Patch Dataset Statistics:\n")
+#     print(f"Total samples: {len(dataset)}")
+#     print(f"Training examples: {len(train_data)}")
+#     print(f"Validation examples: {len(val_data)}")
+#     print(f"Batch size: {batch_size}")
+
+#     return train_loader, val_loader
+
+# def get_default_albumentations_transform():
+#     return A.Compose([
+#         A.HorizontalFlip(p=0.5),
+#         A.VerticalFlip(p=0.5),
+#         A.RandomRotate90(p=0.5),
+#         # Add more augmentations as needed
+#     ])
+

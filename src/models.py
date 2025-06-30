@@ -1,7 +1,9 @@
 from PIL import Image
+from sklearn.preprocessing import scale
 import torch
 import torch.nn as nn
 import torchvision.transforms as T
+import torch.nn.functional as F
 
 def upsample_images(images, scale_factor, method="bicubic"):
     """
@@ -68,12 +70,13 @@ class SRCNN(nn.Module):
     """
     Super-Resolution Convolutional Neural Network (SRCNN)
     """
-    def __init__(self, upsample_factor):
+    def __init__(self, upsample_factor, middle_k_size=5):
         super(SRCNN, self).__init__()
+        self.upsample_factor = upsample_factor
         self.body = nn.Sequential(
             nn.Conv2d(1, 64, kernel_size=9, padding=4),
             nn.ReLU(inplace=True),
-            nn.Conv2d(64, 32, kernel_size=1, padding=0),
+            nn.Conv2d(64, 32, kernel_size=middle_k_size, padding=middle_k_size // 2),
             nn.ReLU(inplace=True),
             nn.Conv2d(32, 1, kernel_size=5, padding=2),
         )
@@ -81,6 +84,7 @@ class SRCNN(nn.Module):
     def forward(self, x):
         """
         Forward pass of the model.
+        Applies bicubic upsampling before passing through the network.
 
         Args:
             x (torch.Tensor): Input tensor of shape (N, C, H, W).
@@ -88,6 +92,7 @@ class SRCNN(nn.Module):
         Returns:
             torch.Tensor: Output tensor of shape (N, C', H', W').
         """
+        x = F.interpolate(x, scale_factor=self.upsample_factor, mode='bicubic', align_corners=False)
         return self.body(x)
 
 class FSRCNN(nn.Module):
@@ -175,10 +180,10 @@ def get_y_tensors(rgb_imgs):
         y_tensors.append(y_tensor)
     return y_tensors
 
-
-class FSRCNN_CA(nn.Module):
-    def __init__(self, scale):
+class FSRCA(nn.Module):
+    def __init__(self, upsample_factor):
         super().__init__()
+        self.upsample_factor = upsample_factor
         d, s = 56, 12  # FSRCNN params
         self.extract = nn.Sequential(
             nn.Conv2d(1, d, kernel_size=5, padding=2),
@@ -191,23 +196,21 @@ class FSRCNN_CA(nn.Module):
         # Solo 1 o 2 RCAB blocks en lugar de 4 convs
         self.mapping = RIR(n_feat=s, n_blocks=4)  # RIR con 4 RCABs
 
-
         self.expand = nn.Sequential(
             nn.Conv2d(s, d, kernel_size=1),
             nn.PReLU(d)
         )
-        self.deconv = nn.ConvTranspose2d(d, 1, kernel_size=9, stride=scale, padding=4, output_padding=scale - 1)
+        self.deconv = nn.ConvTranspose2d(d, 1, kernel_size=9, stride=upsample_factor, padding=4, output_padding=upsample_factor - 1)
 
-        # Inicialización como en FSRCNN
         self._initialize_weights()
 
     def forward(self, x):
-        x = self.extract(x)
-        x = self.shrink(x)
-        x = self.mapping(x)
-        x = self.expand(x)
-        x = self.deconv(x)
-        return x.clamp(0.0, 1.0)
+        out1 = self.extract(x) # out1 es de forma (N, d, H, W)
+        out2 = self.shrink(out1) # out2 es de forma (N, s, H, W)
+        out3 = self.mapping(out2) # out3 es de forma (N, s, H, W)
+        out4 = self.expand(out3 + out2) # out4 es de forma (N, d, H, W)
+        z = self.deconv(out4 + out1) # z es de forma (N, 1, H', W')
+        return z
 
     def _initialize_weights(self):
         for m in self.modules():
@@ -219,6 +222,55 @@ class FSRCNN_CA(nn.Module):
                 nn.init.normal_(m.weight, std=0.001)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
+
+
+# class BAD(nn.Module):
+#     def __init__(self, upsample_factor):
+#         super().__init__()
+#         self.upsample_factor = upsample_factor
+#         d, s = 56, 12  # FSRCNN params
+#         self.extract = nn.Sequential(
+#             nn.Conv2d(1, d, kernel_size=5, padding=2),
+#             nn.PReLU(d)
+#         )
+#         self.shrink = nn.Sequential(
+#             nn.Conv2d(d, s, kernel_size=1),
+#             nn.PReLU(s)
+#         )
+#         # Solo 1 o 2 RCAB blocks en lugar de 4 convs
+#         self.mapping = RIR(n_feat=s, n_blocks=2)  # RIR con 2 RCABs
+
+#         self.expand = nn.Sequential(
+#             nn.Conv2d(s, d, kernel_size=1),
+#             nn.PReLU(d)
+#         )
+#         self.deconv = nn.Sequential(
+#             nn.Conv2d(d, upsample_factor**2, kernel_size=9, padding=4),
+#             nn.PixelShuffle(upsample_factor),
+#             nn.Conv2d(1, 1, kernel_size=3, padding=1)  # Aseguramos que la salida sea de un solo canal
+#         )
+
+#         self._initialize_weights()
+
+#     def forward(self, x):
+#         out1 = self.extract(x) # out1 es de forma (N, d, H, W)
+#         out2 = self.shrink(out1) # out2 es de forma (N, s, H, W)
+#         out3 = self.mapping(out2) # out3 es de forma (N, s, H, W)
+#         out4 = self.expand(out3 + out2) # out4 es de forma (N, d, H, W)
+#         z = self.deconv(out4 + out1) # z es de forma (N, 1, H', W')
+#         return z.clamp(0, 1)
+
+#     def _initialize_weights(self):
+#         for m in self.modules():
+#             if isinstance(m, nn.Conv2d):
+#                 nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+#                 if m.bias is not None:
+#                     nn.init.zeros_(m.bias)
+#             elif isinstance(m, nn.ConvTranspose2d):
+#                 nn.init.normal_(m.weight, std=0.001)
+#                 if m.bias is not None:
+#                     nn.init.zeros_(m.bias)
+
 
 class RCAB(nn.Module):
     def __init__(self, n_feat, kernel_size=3, reduction=8, bias=True):
@@ -257,5 +309,7 @@ class RIR(nn.Module):
 
     def forward(self, x):
         return x + self.blocks(x)
+    
+
 
 
