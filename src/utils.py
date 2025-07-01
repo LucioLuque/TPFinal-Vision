@@ -175,7 +175,7 @@ def get_models(models_names, factor, device='cuda'):
             raise ValueError(f"Unknown model name: {name}")
     return models
             
-def get_models_results(models_name, set_numbers, factors, device="cuda"):
+def get_models_results(models_name, set_numbers, factors, device="cuda", time_test=1):
     rows = []
     for factor in factors:
         models = get_models(models_name, factor, device=device)
@@ -188,20 +188,22 @@ def get_models_results(models_name, set_numbers, factors, device="cuda"):
 
             for model, title in zip(models, models_name):
                 if model:
-                    start = time.time()
-                    results = evaluate_model_on_sets(
-                        model,
-                        [set_number],  
-                        [factor],     
-                        device,
-                        print=False,
-                        show_plots=False
-                    )
-                    elapsed = time.time() - start
-                    psnr = results[set_number]["psnr"]
-                    ssim = results[set_number]["ssim"]
+                    time_var = 0
+                    for _ in range(time_test):
+                        results = evaluate_model_on_sets(
+                            model,
+                            [set_number],  
+                            [factor],     
+                            device,
+                            print=False,
+                            show_plots=False
+                        )
+                        psnr = results[set_number]["psnr"]
+                        ssim = results[set_number]["ssim"]
+                        avg_time = results[set_number]["time"]
+                        time_var += avg_time / time_test
 
-                    row[title] = f"{psnr:.2f}/{ssim:.4f}/{elapsed:.2f}s"
+                    row[title] = f"{psnr:.2f}/{ssim:.4f}/{time_var:.6f}s"
                 else:
                     row[title] = "-"
             rows.append(row)
@@ -291,7 +293,8 @@ def plot_zoom_patches(set_dict, img_index, factor, models, models_names, zoom_pa
                 fontsize='large'    
             )
         ax.axis('off')
-    plt.tight_layout()
+    # plt.tight_layout()
+    plt.subplots_adjust(wspace=0.8)  # Increase value for more space between columns
     plt.show()
 
 def compare_plot_patches_models(set_dict, img_index, factor, models_names, zoom_patches_args, device):
@@ -498,11 +501,15 @@ def evaluate_model_on_sets(model, sets, factor_list, device, print=True, show_pl
             sr_y_imgs = []
             sr_color_imgs_np = []
 
+            running_avg = 0
             for img in lr_imgs:
                 img_channels = rgb_to_ycbcr(img)
                 y_channel = img_channels[0].to(device)  # (1, H, W)
                 with torch.no_grad():
+                    start_time = time.time()
                     sr_y = model(y_channel)
+                elapsed = time.time() - start_time
+                running_avg += elapsed
                 sr_y = torch.clamp(sr_y.cpu(), 0, 1)
                 sr_y = sr_y[:, :, f:-f, f:-f].squeeze(0).squeeze(0)
                 sr_y_imgs.append(sr_y)
@@ -538,10 +545,11 @@ def evaluate_model_on_sets(model, sets, factor_list, device, print=True, show_pl
             
             results[s]= {
                 "psnr": psnr,
-                "ssim": ssim
+                "ssim": ssim,
+                "time": running_avg / len(lr_imgs)
             }
     if print:
         for s, metrics in results.items():
-            print(f"Set {s} - Average PSNR: {metrics['psnr']} dB, SSIM: {metrics['ssim']}")
+            print(f"Set {s} - Average PSNR: {metrics['psnr']} dB, SSIM: {metrics['ssim']}, Time: {metrics['time']} seconds")
     else:
         return results
