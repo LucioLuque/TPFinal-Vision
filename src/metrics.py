@@ -3,7 +3,6 @@ from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similari
 import numpy as np 
 import torch
 
-
 def calculate_psnr(image_true, image_test, data_range=255):
     np_image_true = np.array(image_true)
     np_image_test = np.array(image_test)
@@ -15,7 +14,6 @@ def calculate_psnr_torch(true_batch, pred_batch): # for GPU calculation
     mse = torch.mean((true_batch - pred_batch) ** 2, dim=[1, 2, 3])  # MSE por imagen
     psnr = 10 * torch.log10(1.0 ** 2 / mse)
     return psnr
-
 
 def calculate_ssim(image_true, image_test, data_range=None, channel_axis=-1):
     np_image_true = np.array(image_true)

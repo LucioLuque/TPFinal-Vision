@@ -33,7 +33,6 @@ def process_and_save(paths, split, out_dir, patch_size, scale, num_patches_per_i
             new_w = int(w * downsampling_factor)
             new_h = int(h * downsampling_factor)
             if downsampling_factor < 1.0:
-                #new_y = cv2.resize(new_y, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
                 new_y = resize_with_antialiasing(new_y, new_w, new_h)
 
             # Ensure cropable size
@@ -83,8 +82,6 @@ def prepare_sr_dataset(image_dir, out_dir, patch_size=48, scale=2, num_patches_p
 
     print(f"Total training patches: {len(train_paths) * num_patches_per_image}")
     print(f"Total validation patches: {len(val_paths) * num_patches_per_image}")
-
-
 
 class FastSRDataset(torch.utils.data.Dataset):
     def __init__(self, dir_path):

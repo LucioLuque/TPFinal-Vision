@@ -13,7 +13,6 @@ import torchvision.transforms as T
 import torch.nn.functional as F
 import json
 import matplotlib.pyplot as plt
-from PIL import Image
 import os
 import cv2
 import time
@@ -50,52 +49,6 @@ def get_test_images(set_numbers=[5, 14], factors=[2, 3, 4]):
                 'hr': hr_images
             }
     return test_images
-
-# def get_interpolation_results(all_images, set_numbers=[5, 14], factors=[2, 3, 4], methods = ["nearest", "bilinear", "bicubic"]):
-#     results = []
-#     for set_number in set_numbers:
-#         for factor in factors:
-#             for method in methods:
-                
-#                 lr_images = all_images[set_number][factor]['lr']
-#                 hr_images = all_images[set_number][factor]['hr']
-#                 model = Upsampler(mode=method, scale_factor=factor)
-#                 lr_images = get_y_tensors(lr_images)
-#                 hr_images = get_y_tensors(hr_images)
-
-#                 unsampled_images = [model(img) for img in lr_images]
-#                 unsampled_images = [img[:, :, factor:-factor, factor:-factor].squeeze() for img in unsampled_images]
-#                 hr_images = [img[:, :, factor:-factor, factor:-factor].squeeze() for img in hr_images]
-
-#                 psnr, ssim = calculate_average_metrics(hr_images, unsampled_images, data_range=1.0)
-
-#                 new_row = {
-#                     "Dataset": f"Set{set_number}",
-#                     "Factor": factor,
-#                     "Method": method,
-#                     "PSNR": round(psnr, 2),
-#                     "SSIM": round(ssim, 4)
-#                 }
-#                 results.append(new_row)
-#     df = pd.DataFrame(results)
-#     df["Value"] = (
-#         df["PSNR"].map("{:.2f}".format)
-#         + "/"
-#         + df["SSIM"].map("{:.4f}".format)
-#     )
-#     table = df.pivot(
-#         index=["Dataset", "Factor"],
-#         columns="Method",
-#         values="Value"
-#     )
-#     table = table.reset_index()
-
-#     table["Set_num"] = table["Dataset"].str.extract(r"Set(\d+)").astype(int)
-#     table = table.sort_values(by=["Set_num", "Factor"])
-#     table = table.drop(columns="Set_num")
-#     table = table[["Dataset", "Factor", "nearest", "bilinear", "bicubic"]]
-#     return table
-
 
 def get_models(models_names, factor, device='cuda'):
     models = []
@@ -258,7 +211,6 @@ def plot_zoom_patches(set_dict, img_index, factor, models, models_names, zoom_pa
     patches= []
     psnr_list = []
 
-    
     for model in (models):
         model= model.to(device).eval()
         with torch.no_grad():
@@ -299,7 +251,6 @@ def plot_zoom_patches(set_dict, img_index, factor, models, models_names, zoom_pa
 
 def compare_plot_patches_models(set_dict, img_index, factor, models_names, zoom_patches_args, device):
     models = get_models(models_names, factor, device=device)
-
     plot_zoom_patches(set_dict, img_index, factor, models, models_names, zoom_patches_args, device=device)
 
 def train_model(model, train_loader, val_loader, factor, num_epochs=50, lr=1e-4, criterion=nn.MSELoss(), early_stopping_patience=10):
@@ -438,7 +389,6 @@ def compare_loss_plot(loss, models_names, fts, factor, titles, colors, loss_labe
     plt.show()
 
 def load_results(model_name, factor, ft=False, device='cuda'):
-
     model_upper = model_name.upper()
     weights_path = f"../Results/Weights/{model_upper}/{model_name}_x{factor}"
     losses_path = f"../Results/Losses/{model_upper}/{model_name}_x{factor}"
@@ -458,19 +408,13 @@ def load_results(model_name, factor, ft=False, device='cuda'):
     return model_weights, losses_data
 
 def rgb_to_ycbcr(img):
-    """ Convert a PIL RGB image to YCbCr and return all channels as tensors. """
+    """ Convert a PIL RGB image to YCbCr and return all channels as tensors."""
     to_tensor = T.ToTensor()
     ycbcr = img.convert("YCbCr").split()  # Extrae sólo el canal Y como PIL.Image
-    tensors = [to_tensor(channel).unsqueeze(0) for channel in ycbcr]  # (1, H, W) for each channel
+    tensors = [to_tensor(channel).unsqueeze(0) for channel in ycbcr]  # (1, H, W)
     return tensors
 
 def color_sr(sr, color_channels, f):
-    """
-    Upsample the color channels by f
-    Crop the borders to match the SR image size
-    Combine the Y channel with the upsampled color channels
-    Convert back to RGB and return as numpy array.
-    """
     # Upsample Cb, Cr
     upsampled = [F.interpolate(channel, scale_factor=f, mode='bicubic', align_corners=False) for channel in color_channels]
     # Crop borders
@@ -480,12 +424,11 @@ def color_sr(sr, color_channels, f):
     y_pil = to_pil(sr.unsqueeze(0))  # (H, W) -> PIL
     cb_pil = to_pil(cropped[0].squeeze(0))
     cr_pil = to_pil(cropped[1].squeeze(0))
-    # Recombinar como YCbCr
+    # Recombine channels into YCbCr
     ycbcr = Image.merge("YCbCr", (y_pil, cb_pil, cr_pil))
-    # Convertir a RGB
+    # Convert back to RGB
     rgb = ycbcr.convert("RGB")
     return np.array(rgb)
-
 
 def evaluate_model_on_sets(model, sets, factor_list, device, print=True, show_plots=True):
     test_imgs = get_test_images(sets, factor_list)
